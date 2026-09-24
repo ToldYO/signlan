@@ -1,0 +1,76 @@
+{
+  "vocabulary_size": 30,
+  "description": "Target 30-word dynamic ASL vocabulary subset covering greetings, common verbs, emergency terms, nouns, and adjectives from WLASL.",
+  "categories": {
+    "greetings_and_social": [
+      "hello",
+      "thank you",
+      "please",
+      "yes",
+      "no",
+      "sorry",
+      "goodbye"
+    ],
+    "action_verbs": [
+      "drink",
+      "eat",
+      "help",
+      "want",
+      "like",
+      "stop",
+      "go",
+      "see",
+      "come",
+      "need"
+    ],
+    "entities_and_nouns": [
+      "water",
+      "food",
+      "friend",
+      "family",
+      "house",
+      "school",
+      "book",
+      "computer"
+    ],
+    "states_and_adjectives": [
+      "good",
+      "bad",
+      "happy",
+      "sad",
+      "more"
+    ]
+  },
+  "words": [
+    "hello",
+    "thank you",
+    "please",
+    "yes",
+    "no",
+    "sorry",
+    "goodbye",
+    "drink",
+    "eat",
+    "help",
+    "want",
+    "like",
+    "stop",
+    "go",
+    "see",
+    "come",
+    "need",
+    "water",
+    "food",
+    "friend",
+    "family",
+    "house",
+    "school",
+    "book",
+    "computer",
+    "good",
+    "bad",
+    "happy",
+    "sad",
+    "more"
+  ]
+}

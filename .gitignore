@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+venv/
+.env
+env/
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Heavy raw video recordings (can be regenerated or downloaded)
+data/raw/*.mp4
+!data/raw/demo_hello.mp4
+
+# Downloaded model bundle (auto-fetched if missing)
+models/hand_landmarker.task
+
+# LaTeX auxiliary build files
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
