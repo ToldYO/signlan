@@ -12,7 +12,9 @@
 \large Deep Temporal Sequence Modeling and Ablation Benchmarks for Dynamic ASL Recognition}
 \author{
   Ahmad Nakhala \\
-  \texttt{aalnakha@emich.edu}
+  \texttt{aalnakha@emich.edu} \\
+  \vspace{0.3em}
+  \normalsize Code Repository: \url{https://github.com/ToldYO/signlan}
 }
 \date{\today}
 
@@ -21,7 +23,7 @@
 \maketitle
 
 \section*{Project Overview}
-This project investigates low-latency, privacy-preserving dynamic American Sign Language (ASL) recognition using monocular webcam keypoint trajectory tracking. By decoupling geometric feature extraction from temporal sequence modeling, we avoid computationally heavy 3D-CNNs and raw RGB frame transmission. During Weeks~1 and~2, we established the real-time MediaPipe HandLandmarker pipeline (43.7~FPS on CPU), developed affine-invariant spatial normalization (wrist-centered translation and MCP-distance scaling), formulated temporal spline resampling ($T = 30$ frames), built the PyTorch dataset pipeline with kinematic augmentations, and trained non-deep-learning baselines (Random Forest and Support Vector Classifiers).
+This project investigates low-latency, privacy-preserving dynamic American Sign Language (ASL) recognition using monocular webcam keypoint trajectory tracking. By decoupling geometric feature extraction from temporal sequence modeling, we avoid computationally heavy 3D-CNNs and raw RGB frame transmission. The open-source project repository, including dataset manifests, trained model checkpoints, and reproduction scripts, is available at \url{https://github.com/ToldYO/signlan}. During Weeks~1 and~2, we established the real-time MediaPipe HandLandmarker pipeline (43.7~FPS on CPU), developed affine-invariant spatial normalization (wrist-centered translation and MCP-distance scaling), formulated temporal spline resampling ($T = 30$ frames), built the PyTorch dataset pipeline with kinematic augmentations, and trained non-deep-learning baselines (Random Forest and Support Vector Classifiers).
 
 In \textbf{Week 3}, we transitioned to deep temporal sequence modeling. We designed, implemented, and empirically benchmarked two complementary sequential neural architectures:
 \begin{enumerate}
@@ -164,13 +166,24 @@ For the upcoming week, we will focus on advanced spatiotemporal modeling and dep
     \item \textbf{Model Quantization \& ONNX Export:} Export the trained 1D-TCN and BiGRU models to ONNX runtime with INT8 dynamic quantization to further reduce memory footprint and latency for in-browser deployment.
 \end{itemize}
 
-\section*{Project Contributions}
-This is an individual project. All architecture designs, mathematical formulations, training implementations, and experimental profiling were completed independently by \textbf{Ahmad Nakhala}:
+\section*{Project Contributions, Repository, and AI Disclosure}
+This is an individual course project directed, designed, and evaluated by \textbf{Ahmad Nakhala}:
 \begin{itemize}
-    \item \textbf{BiGRU with Attention:} Formulated and implemented the 2-layer Bidirectional GRU with self-attentive temporal pooling in \texttt{src/models.py}.
-    \item \textbf{Dilated 1D-TCN:} Designed the 4-layer multi-scale dilated residual convolutional network with receptive field formalization ($RF = 61$).
-    \item \textbf{Training \& Profiling Pipeline:} Developed \texttt{src/trainer.py} with AdamW, Cosine Annealing, early stopping, and multi-metric validation, and added percentile latency profiling ($p_{50}, p_{95}, p_{99}$) in \texttt{src/profiler.py}.
-    \item \textbf{Interactive Webcam Demo:} Updated \texttt{scripts/demo_webcam.py} to support real-time dynamic switching between deep models and baseline classifiers with on-screen performance metrics.
+    \item \textbf{Open-Source Code Repository:} The full implementation, including preprocessing scripts, deep learning model architectures, training routines, benchmark evaluation tables, and live demo utilities, is hosted on GitHub:
+    \begin{center}
+        \url{https://github.com/ToldYO/signlan}
+    \end{center}
+    
+    \item \textbf{Individual Contributions:}
+    \begin{itemize}
+        \item \textbf{BiGRU with Attention:} Formulated and implemented the 2-layer Bidirectional GRU with self-attentive temporal pooling in \texttt{src/models.py}.
+        \item \textbf{Dilated 1D-TCN:} Designed the 4-layer multi-scale dilated residual convolutional network with receptive field formalization ($RF = 61$).
+        \item \textbf{Training \& Profiling Pipeline:} Developed \texttt{src/trainer.py} with AdamW, Cosine Annealing, early stopping, and multi-metric validation, and added percentile latency profiling ($p_{50}, p_{95}, p_{99}$) in \texttt{src/profiler.py}.
+        \item \textbf{Interactive Webcam Demo:} Updated \texttt{scripts/demo\_webcam.py} to support real-time dynamic switching between deep models and baseline classifiers with on-screen performance metrics.
+    \end{itemize}
+
+    \item \textbf{Statement of AI Assistance:}
+    In accordance with course guidelines and academic integrity standards, an AI coding assistant (LLM pair-programmer) was utilized as an interactive programming tool. Specifically, AI assistance was employed for boiler-plate code scaffolding, API syntax verification, unit test generation, and LaTeX formatting. All theoretical problem formulations, deep neural network architecture selections, hyperparameter configurations, experimental benchmark executions, and analysis of empirical results were independently directed, verified, and finalized by Ahmad Nakhala.
 \end{itemize}
 
 \begin{thebibliography}{99}

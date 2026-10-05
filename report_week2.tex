@@ -10,7 +10,9 @@
 \large Low-Latency, Privacy-Preserving Dynamic ASL Recognition via Geometric Trajectory Modeling}
 \author{
   Ahmad Nakhala \\
-  \texttt{aalnakha@emich.edu}
+  \texttt{aalnakha@emich.edu} \\
+  \vspace{0.3em}
+  \normalsize Code Repository: \url{https://github.com/ToldYO/signlan}
 }
 \date{\today}
 
@@ -113,13 +115,21 @@ Our primary milestones for the upcoming week include:
     \item \textbf{Evaluation Benchmarking Focus:} In addition to standard Top-1 and Top-5 accuracy, we are prioritizing Macro-Averaged F1-score to ensure class-imbalance invariance. We welcome your recommendations on whether user-study latency percentiles ($p_{95}$ latency) should also be reported.
 \end{itemize}
 
-\section*{Project Contributions}
-This is an individual project. All system design, mathematical formulation, and software development were executed independently by \textbf{Ahmad Nakhala}:
+\section*{Project Contributions, Repository, and AI Disclosure}
+This is an individual project directed and conducted by \textbf{Ahmad Nakhala}:
 \begin{itemize}
-    \item \textbf{Data Pipeline \& Ingestion:} Built the automated WLASL dataset ingestion and filtering script (\texttt{src/data\_ingestion.py}) to isolate the 30-word target vocabulary, and developed the synthetic articulated hand video generator for deterministic offline testing.
-    \item \textbf{Spatial Normalization \& Profiling:} Formulated the wrist-centered translation and MCP-distance scale normalization algorithms, verified affine invariance via unit tests in \texttt{tests/test\_pipeline.py}, and conducted real-time CPU throughput profiling (43.7 FPS).
-    \item \textbf{PyTorch Dataset \& DataLoader:} Built the \texttt{ASLKeypointDataset}, multi-split \texttt{DataLoader} pipeline, temporal spline resampling ($T=30$ frames), and kinematic augmentations (jitter, scaling, rotation).
-    \item \textbf{Feature Engineering \& Baselines:} Formulated and extracted the 714 kinematic trajectory features, tuned and trained the Random Forest and SVC baseline classifiers, and established the evaluation benchmark suite.
+    \item \textbf{Source Code Repository:} The project source code and reproducible experiments are available at:
+    \begin{center}
+        \url{https://github.com/ToldYO/signlan}
+    \end{center}
+    \item \textbf{Individual Contributions:}
+    \begin{itemize}
+        \item \textbf{Data Pipeline \& Ingestion:} Built the automated WLASL dataset ingestion and filtering script (\texttt{src/data\_ingestion.py}) to isolate the 30-word target vocabulary, and developed the synthetic articulated hand video generator for deterministic offline testing.
+        \item \textbf{Spatial Normalization \& Profiling:} Formulated the wrist-centered translation and MCP-distance scale normalization algorithms, verified affine invariance via unit tests in \texttt{tests/test\_pipeline.py}, and conducted real-time CPU throughput profiling (43.7 FPS).
+        \item \textbf{PyTorch Dataset \& DataLoader:} Built the \texttt{ASLKeypointDataset}, multi-split \texttt{DataLoader} pipeline, temporal spline resampling ($T=30$ frames), and kinematic augmentations (jitter, scaling, rotation).
+        \item \textbf{Feature Engineering \& Baselines:} Formulated and extracted the 714 kinematic trajectory features, tuned and trained the Random Forest and SVC baseline classifiers, and established the evaluation benchmark suite.
+    \end{itemize}
+    \item \textbf{Statement of AI Assistance:} An AI coding assistant was used for code scaffolding, documentation formatting, and LaTeX preparation. All core algorithms, feature formulations, and experimental evaluations were designed and verified by Ahmad Nakhala.
 \end{itemize}
 
 \begin{thebibliography}{99}
