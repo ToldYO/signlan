@@ -126,11 +126,9 @@ class ASLBaselineBenchmarks:
     ) -> Pipeline:
         """Trains an RBF Support Vector Classifier with standard scaling pipeline."""
         logger.info(f"Training Support Vector Classifier (RBF kernel, C={C})...")
-        base_svc = SVC(C=C, kernel="rbf", gamma=gamma, random_state=random_state)
-        calibrated_svc = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
         svc_pipe = Pipeline([
             ("scaler", StandardScaler()),
-            ("svc", calibrated_svc),
+            ("svc", SVC(C=C, kernel="rbf", gamma=gamma, probability=True, random_state=random_state)),
         ])
         svc_pipe.fit(X_train, y_train)
         self.models["svc"] = svc_pipe

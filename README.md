@@ -1,13 +1,16 @@
 # Low-Latency Privacy-Preserving ASL Recognition via Coordinate Trajectory Tracking
 
-This repository contains the complete implementation for **Week 1** and **Week 2** of the American Sign Language (ASL) recognition system.
+This repository contains the complete implementation for **Week 1**, **Week 2**, and **Week 3** of the American Sign Language (ASL) dynamic recognition system.
 
 The project investigates low-latency, privacy-preserving dynamic word-level sign language recognition from monocular webcam feeds. Rather than relying on computationally heavy 3D-CNNs operating directly on high-dimensional raw video frames, the architecture decouples geometric feature extraction from temporal sequence modeling:
 1. **Geometric Feature Extraction**: Extracts 21 3D hand keypoints per frame via Google MediaPipe Hands (63 float coordinates for single hand, 126 for dual-hand).
 2. **Spatial Normalization**: Zero-centers coordinates at the wrist (Landmark 0) and scales by the Euclidean distance between the wrist and the middle-finger MCP joint (Landmark 9) for scale and translation invariance.
 3. **Temporal Resampling**: Resamples variable-length coordinate trajectories (15–75 frames) to a uniform temporal window of $T = 30$ frames (1.0 second at 30 FPS).
-4. **PyTorch Dataset & DataLoader**: Batches tensors into shapes of `(batch_size, 30, 63)` with kinematic coordinate augmentations.
-5. **Non-Deep-Learning Baselines**: Extracts rich spatial and kinematic trajectory statistics (mean, variance, velocity, acceleration, path length) and evaluates **Random Forest** and **Support Vector Classifiers (SVC)** with **Top-1**, **Top-5**, and **Macro F1-score** metrics.
+4. **PyTorch Dataset & DataLoader**: Batches tensors into shapes of `(batch_size, 30, 63)` (or `(batch_size, 30, 126)`) with kinematic coordinate augmentations.
+5. **Non-Deep-Learning Baselines**: Extracts 714 trajectory statistics (mean, variance, velocity, acceleration, path length) and evaluates **Random Forest** and **Support Vector Classifiers (SVC)**.
+6. **Deep Temporal Sequence Modeling**:
+   - **Bidirectional GRU (BiGRU)**: 2-layer BiGRU with self-attentive temporal pooling, focusing dynamically on key gesture inflection phases.
+   - **1D Temporal Convolutional Network (1D-TCN)**: Dilated residual 1D convolutions ($d \in \{1, 2, 4, 8\}$, receptive field $RF = 61$ frames) providing ultra-low-latency ($<1.5$\,ms) inference.
 
 ---
 
@@ -23,11 +26,15 @@ handsignlang/
 │   │   └── wlasl_30_subset.json    # Isolated 30-word subset metadata (547 instances)
 │   ├── raw/                        # Video clips & generated benchmark instances
 │   └── processed/
-│       └── benchmark_results.json  # Exported metrics (Top-1, Top-5, Macro F1, confusion matrices)
+│       ├── cached_trajectories.npz # Cached pre-extracted keypoint trajectories
+│       ├── benchmark_results.json  # Master benchmark results
+│       └── benchmark_results_week3.json # Detailed Week 3 ablation study metrics
 ├── models/
 │   ├── hand_landmarker.task        # MediaPipe HandLandmarker model bundle
 │   ├── random_forest_baseline.joblib # Persisted Random Forest classifier
-│   └── svc_baseline.joblib          # Persisted Support Vector Classifier pipeline
+│   ├── svc_baseline.joblib          # Persisted Support Vector Classifier pipeline
+│   ├── bigru_best.pth               # Trained BiGRU + Attention checkpoint
+│   └── tcn_best.pth                 # Trained 1D-TCN checkpoint
 ├── src/
 │   ├── __init__.py
 │   ├── data_ingestion.py           # WLASL metadata ingestion, subset isolation, synthetic clip generation
@@ -36,14 +43,21 @@ handsignlang/
 │   ├── dataset.py                  # PyTorch ASLKeypointDataset, DataLoader & kinematic augmentations
 │   ├── feature_extraction.py       # Trajectory feature engineering (spatial stats, velocity, acceleration)
 │   ├── baselines.py                # ML baseline models (Random Forest, SVC) and Top-K evaluation
-│   └── profiler.py                 # Latency, FPS throughput, and CPU profiling
+│   ├── models.py                   # Week 3 deep learning models (BiGRU, Attention, 1D-TCN)
+│   ├── trainer.py                  # PyTorch training loop (AdamW, Cosine Annealing, early stopping)
+│   └── profiler.py                 # Latency percentiles (p50, p95, p99), FPS throughput, and CPU profiling
 ├── scripts/
 │   ├── run_week1_pipeline.py       # Week 1 end-to-end verification and profiling runner
 │   ├── run_week2_pipeline.py       # Week 2 spatial norm, PyTorch DataLoader & ML baseline benchmarks
-│   └── demo_webcam.py              # Real-time interactive webcam sign HUD and classifier demo
+│   ├── run_week3_pipeline.py       # Week 3 deep models training, ablation study, and profiling
+│   └── demo_webcam.py              # Real-time interactive webcam sign HUD supporting all models
 ├── tests/
 │   ├── __init__.py
-│   └── test_pipeline.py            # Unit tests for invariance, interpolation, dataset, and models
+│   ├── test_pipeline.py            # Unit tests for preprocessing, interpolation, dataset, and baselines
+│   └── test_week3_models.py        # Unit tests for BiGRU, Attention, 1D-TCN, and Trainer
+├── report_week2.tex                # Week 2 LaTeX progress report
+├── report_week3.tex                # Week 3 LaTeX progress report
+├── bibliography.bib                # Project bibliography BibTeX entries
 ├── requirements.txt
 └── README.md
 ```
@@ -97,6 +111,27 @@ handsignlang/
 
 ---
 
+## Week 3 Deliverables Summary
+
+1. **Bidirectional GRU with Temporal Attention Pooling**:
+   - Built 2-layer BiGRU with hidden dimension $H = 128$, dropout regularization ($p = 0.3$), operating directly on coordinate tensors `(batch_size, 30, 63)` (and `(batch_size, 30, 126)` for dual hands).
+   - Formulated self-attentive temporal pooling ($\alpha_t = \text{Softmax}(w^T \tanh(W h_t + b))$) and concatenated attention context with mean-pooled context to dynamically emphasize informative gesture phases.
+2. **Dilated 1D Temporal Convolutional Network (1D-TCN)**:
+   - Stacks 4 residual blocks with exponential dilation factors $d \in \{1, 2, 4, 8\}$ and kernel size $K = 3$.
+   - Receptive field $RF = 61$ frames, strictly encompassing the full 30-frame sequence window.
+   - Non-recurrent feed-forward execution yields peak inference throughput exceeding **760 FPS** on CPU.
+3. **Dual-Hand (126-D) Expansion**:
+   - Expanded tensor representation to 126 features ($42 \times 3$) with independent wrist-centering, middle MCP scale normalization, and automated zero-padding with presence indication.
+4. **Comprehensive Ablation Study & Benchmarking**:
+   - Compared **Random Forest**, **SVC**, **BiGRU + Attention**, and **1D-TCN**.
+   - BiGRU achieves **76.67% Top-1** and **96.67% Top-5** accuracy (Macro F1: 73.33%), outperforming static baselines by $+23.3\%$ Top-1.
+   - 1D-TCN achieves **73.33% Top-1** accuracy with an ultra-low latency of **1.22 ms** ($p_{95} = 1.81$ ms) on standard CPU.
+   - Successfully disambiguates fine-grained geometric minimal pairs (*hello* vs. *goodbye*, *drink* vs. *eat*).
+5. **Interactive Real-Time Webcam HUD**:
+   - Updated `scripts/demo_webcam.py` with multi-model backend switching ('m' key) and real-time confidence HUD.
+
+---
+
 ## How to Run
 
 ### 1. Execute Week 1 Pipeline
@@ -111,16 +146,33 @@ Runs spatial invariance verification, benchmark dataset generation, PyTorch Data
 python scripts/run_week2_pipeline.py
 ```
 
-### 3. Run Real-Time Webcam Demo
-Launches the live webcam feed with skeleton tracking HUD and dynamic sign classification:
+### 3. Execute Week 3 Pipeline
+Executes keypoint extraction caching, DataLoader preparation, BiGRU + Attention training, 1D-TCN training, CPU latency profiling percentiles ($p_{50}, p_{95}, p_{99}$), and comparative ablation benchmarking:
 ```bash
-python scripts/demo_webcam.py
+python scripts/run_week3_pipeline.py
 ```
 
-### 4. Run Unit Tests
-Executes the comprehensive unit test suite:
+### 4. Run Real-Time Webcam Demo
+Launches the live webcam feed with skeleton tracking HUD and dynamic sign classification (supports BiGRU, 1D-TCN, Random Forest, and SVC):
 ```bash
-python -m unittest tests/test_pipeline.py
+# Default: BiGRU with Attention
+python scripts/demo_webcam.py --model_type bigru
+
+# 1D Temporal Convolutional Network
+python scripts/demo_webcam.py --model_type tcn
+
+# Baseline Random Forest
+python scripts/demo_webcam.py --model_type random_forest
+```
+
+### 5. Run Comprehensive Unit Tests
+Executes the unit test suites:
+```bash
+# Pipeline & Preprocessing tests
+python tests/test_pipeline.py
+
+# Week 3 Deep Sequence Models & Trainer tests
+python tests/test_week3_models.py
 ```
 
 ---

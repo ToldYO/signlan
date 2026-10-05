@@ -237,12 +237,13 @@ def generate_benchmark_dataset(
 
             filename = f"{word}_{s_idx:02d}.mp4"
             filepath = os.path.join(output_dir, filename)
-            generate_synthetic_sign_video(
-                gloss=word,
-                output_path=filepath,
-                num_frames=num_frames,
-                seed=(w_idx * 100 + s_idx),
-            )
+            if not os.path.exists(filepath):
+                generate_synthetic_sign_video(
+                    gloss=word,
+                    output_path=filepath,
+                    num_frames=num_frames,
+                    seed=(w_idx * 100 + s_idx),
+                )
             manifest.append({
                 "gloss": word,
                 "label_id": w_idx,

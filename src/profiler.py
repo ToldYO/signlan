@@ -7,10 +7,11 @@ and end-to-end preprocessing overhead to confirm real-time operational feasibili
 import os
 import time
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import numpy as np
 import cv2
 import psutil
+import torch
 
 from src.keypoint_extractor import MediaPipeKeypointExtractor
 from src.preprocessor import preprocess_sequence
@@ -132,3 +133,96 @@ def profile_preprocessing_pipeline(
         }
 
     return benchmarks
+
+
+def profile_model_latency(
+    model: Any,
+    input_sample: Union[np.ndarray, torch.Tensor],
+    is_pytorch: bool = True,
+    iterations: int = 200,
+    warmup: int = 20,
+    device: Optional[torch.device] = None,
+) -> Dict[str, Any]:
+    """
+    Benchmarks model inference latency percentiles (p50, p95, p99), mean latency,
+    and throughput on a single input instance (simulating real-time webcam frame processing).
+
+    Args:
+        model: PyTorch nn.Module or Scikit-Learn Estimator.
+        input_sample: Input tensor (1, T, D) or feature vector (1, N).
+        is_pytorch: If True, uses torch eval mode and torch.no_grad().
+        iterations: Number of evaluation benchmark runs.
+        warmup: Number of initial warmup runs.
+        device: Torch device (defaults to CPU for on-device latency evaluation).
+
+    Returns:
+        Dictionary of latency statistics in milliseconds and throughput in inferences/sec.
+    """
+    if is_pytorch:
+        dev = device or torch.device("cpu")
+        model = model.to(dev)
+        model.eval()
+
+        if isinstance(input_sample, np.ndarray):
+            input_tensor = torch.from_numpy(input_sample).float().to(dev)
+        else:
+            input_tensor = input_sample.to(dev)
+
+        if len(input_tensor.shape) == 2:
+            input_tensor = input_tensor.unsqueeze(0)  # (1, T, D)
+
+        # Warmup
+        with torch.no_grad():
+            for _ in range(warmup):
+                _ = model(input_tensor)
+
+        # Benchmark
+        latencies = []
+        with torch.no_grad():
+            for _ in range(iterations):
+                t0 = time.perf_counter()
+                _ = model(input_tensor)
+                t1 = time.perf_counter()
+                latencies.append((t1 - t0) * 1000.0)
+
+        # Param count
+        param_count = sum(p.numel() for p in model.parameters())
+    else:
+        # Scikit-Learn
+        if isinstance(input_sample, torch.Tensor):
+            input_arr = input_sample.detach().cpu().numpy()
+        else:
+            input_arr = np.array(input_sample)
+
+        if len(input_arr.shape) == 1:
+            input_arr = input_arr.reshape(1, -1)
+
+        # Warmup
+        for _ in range(warmup):
+            _ = model.predict(input_arr)
+
+        latencies = []
+        for _ in range(iterations):
+            t0 = time.perf_counter()
+            _ = model.predict(input_arr)
+            t1 = time.perf_counter()
+            latencies.append((t1 - t0) * 1000.0)
+
+        param_count = None
+
+    latencies = np.array(latencies)
+    mean_ms = float(np.mean(latencies))
+
+    return {
+        "iterations": iterations,
+        "mean_latency_ms": mean_ms,
+        "std_latency_ms": float(np.std(latencies)),
+        "median_latency_ms": float(np.median(latencies)),
+        "p90_latency_ms": float(np.percentile(latencies, 90)),
+        "p95_latency_ms": float(np.percentile(latencies, 95)),
+        "p99_latency_ms": float(np.percentile(latencies, 99)),
+        "min_latency_ms": float(np.min(latencies)),
+        "max_latency_ms": float(np.max(latencies)),
+        "throughput_fps": float(1000.0 / max(1e-4, mean_ms)),
+        "parameter_count": param_count,
+    }

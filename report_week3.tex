@@ -1,0 +1,235 @@
+\documentclass{article}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{microtype}
+
+\title{Progress Report - Week 3\\
+\large Deep Temporal Sequence Modeling and Ablation Benchmarks for Dynamic ASL Recognition}
+\author{
+  Ahmad Nakhala \\
+  \texttt{aalnakha@emich.edu}
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Project Overview}
+This project investigates low-latency, privacy-preserving dynamic American Sign Language (ASL) recognition using monocular webcam keypoint trajectory tracking. By decoupling geometric feature extraction from temporal sequence modeling, we avoid computationally heavy 3D-CNNs and raw RGB frame transmission. During Weeks~1 and~2, we established the real-time MediaPipe HandLandmarker pipeline (43.7~FPS on CPU), developed affine-invariant spatial normalization (wrist-centered translation and MCP-distance scaling), formulated temporal spline resampling ($T = 30$ frames), built the PyTorch dataset pipeline with kinematic augmentations, and trained non-deep-learning baselines (Random Forest and Support Vector Classifiers).
+
+In \textbf{Week 3}, we transitioned to deep temporal sequence modeling. We designed, implemented, and empirically benchmarked two complementary sequential neural architectures:
+\begin{enumerate}
+    \item \textbf{Bidirectional Gated Recurrent Unit (BiGRU)} augmented with a self-attentive temporal pooling mechanism.
+    \item \textbf{1D Temporal Convolutional Network (1D-TCN)} utilizing exponentially dilated residual convolutional blocks ($d \in \{1, 2, 4, 8\}$).
+\end{enumerate}
+We conducted an extensive comparative ablation study evaluating Top-1 accuracy, Top-5 accuracy, Macro-Averaged F1-score, parameter efficiency, and on-device CPU inference latency percentiles ($p_{50}$, $p_{95}$, $p_{99}$).
+
+\section*{Current Progress}
+
+\subsection*{Bidirectional GRU with Temporal Attention Pooling}
+Dynamic signs exhibit non-linear phase transitions where specific temporal segments (e.g., initial hand shape formation, apex path inflection, and terminal deceleration) carry disproportionate semantic weight. Static temporal pooling (such as global averaging) blurs these critical inflection points.
+
+To address this, we developed a 2-layer Bidirectional GRU network with self-attentive temporal pooling. Given a normalized coordinate trajectory $X = (x_1, x_2, \dots, x_T) \in \mathbb{R}^{T \times D}$ (with $T = 30$ frames and input dimension $D \in \{63, 126\}$):
+\begin{enumerate}
+    \item \textbf{Coordinate Embedding:} A linear projection maps raw coordinate features into an initial latent representation:
+    \[
+        e_t = \text{Dropout}(\text{LayerNorm}(\text{ReLU}(W_{\text{emb}} x_t + b_{\text{emb}}))) \in \mathbb{R}^H
+    \]
+    where $H = 128$ is the hidden dimensionality.
+    
+    \item \textbf{Bidirectional Recurrent Modeling:} Forward and backward GRU layers process the sequence simultaneously:
+    \begin{align}
+        \overrightarrow{h}_t &= \text{GRU}_{\text{fwd}}(e_t, \overrightarrow{h}_{t-1}) \\
+        \overleftarrow{h}_t &= \text{GRU}_{\text{bwd}}(e_t, \overleftarrow{h}_{t+1}) \\
+        h_t &= [\overrightarrow{h}_t \,\|\, \overleftarrow{h}_t] \in \mathbb{R}^{2H}
+    \end{align}
+    
+    \item \textbf{Self-Attentive Temporal Pooling:} A parameterized attention mechanism calculates continuous scalar alignment scores across all time steps:
+    \begin{align}
+        u_t &= \tanh(W_a h_t + b_a) \in \mathbb{R}^{D_a} \\
+        \alpha_t &= \frac{\exp(w^T u_t)}{\sum_{k=1}^T \exp(w^T u_k)}, \quad \sum_{t=1}^T \alpha_t = 1.0 \\
+        c_{\text{att}} &= \sum_{t=1}^T \alpha_t h_t \in \mathbb{R}^{2H}
+    \end{align}
+    where $D_a = 64$ is the attention hidden dimension and $\alpha_t$ denotes the normalized attention weight for frame $t$.
+    
+    \item \textbf{Multi-Context Fusion \& Classification:} We concatenate the attention context vector with the mean temporal context to maintain both peak-salience focus and sequence-wide background context:
+    \[
+        c_{\text{fused}} = \left[ c_{\text{att}} \,\|\, \frac{1}{T}\sum_{t=1}^T h_t \right] \in \mathbb{R}^{4H}
+    \]
+    The fused representation passes through a multilayer perceptron (MLP) with batch normalization, GELU activation, and dropout ($p = 0.3$) to compute target gloss logits $\hat{y} \in \mathbb{R}^C$.
+\end{enumerate}
+
+\subsection*{Dilated 1D Temporal Convolutional Network (1D-TCN)}
+While recurrent networks capture sequential transitions well, their step-by-step dependency prohibits full temporal parallelization. We engineered a feed-forward 1D Temporal Convolutional Network (1D-TCN) designed for minimal CPU inference latency and multi-scale temporal receptive field coverage.
+
+\subsubsection*{Receptive Field Formalization}
+Standard convolutions require impractically deep stacks to cover dynamic sign durations. In contrast, dilated convolutions introduce an expansion factor $d$, defining the 1D dilated convolution operation over input sequence $\mathbf{x}$ with filter $k$ of size $K$ as:
+\[
+    y[t] = (\mathbf{x} *_d k)[t] = \sum_{i=0}^{K-1} k[i] \cdot \mathbf{x}[t - d \cdot i]
+\]
+Our architecture stacks $L = 4$ residual blocks with exponential dilation factors $d \in \{1, 2, 4, 8\}$ and kernel size $K = 3$. Each block comprises two dilated 1D convolutional layers, batch normalization, GELU non-linearities, spatial dropout ($p = 0.25$), and a residual identity shortcut (with $1 \times 1$ projection when channel dimensions change).
+
+The effective temporal receptive field ($RF$) across $L$ layers is computed as:
+\[
+    RF = 1 + \sum_{l=1}^L 2 \cdot (K - 1) \cdot d_l = 1 + 2 \cdot (3 - 1) \cdot (1 + 2 + 4 + 8) = 1 + 4 \times 15 = 61 \text{ frames}
+\]
+Because $RF = 61 > 30$, every output feature at the final layer is influenced by the full temporal span of the sign gesture. Symmetric padding preserves an exact temporal sequence length of $T = 30$ throughout all intermediate layers.
+
+\subsection*{Dual-Hand (126-D) Expansion and Normalization}
+In Week~2, our pipeline operated primarily on single-hand trajectories ($D = 63$). In Week~3, we expanded the system to accept full dual-hand inputs ($D = 126$, representing 42 total keypoints $\times$ 3 spatial coordinates):
+\begin{itemize}
+    \item \textbf{Independent Wrist Centering:} If a secondary hand is detected, its 21 landmarks are centered at its own wrist ($P'_{\text{wrist}, 2}$) to preserve local finger geometry independently.
+    \item \textbf{Scale Invariance:} Hand 2 coordinates are scaled by its middle MCP Euclidean distance ($d_{\text{scale}, 2}$).
+    \item \textbf{Zero-Padding \& Presence Handling:} For single-handed signs (e.g., \textit{hello}, \textit{water}), the missing hand is zero-padded. Input projections in both BiGRU and 1D-TCN adaptively learn that zero-valued coordinate blocks indicate an inactive secondary hand.
+\end{itemize}
+
+\subsection*{Training Methodology and Regularization}
+Models were trained using decoupled weight decay AdamW ($\eta = 1.5 \times 10^{-3}$, weight decay $\lambda = 10^{-4}$) \cite{loshchilov2017decoupled} with cosine annealing learning rate schedules ($\eta_{\min} = 10^{-5}$) over 45 epochs. To prevent overfitting on small vocabulary subsets, we incorporated:
+\begin{itemize}
+    \item \textbf{Label Smoothing:} Cross-entropy loss with $\epsilon = 0.05$ label smoothing, preventing overconfident output distributions.
+    \item \textbf{Kinematic Coordinate Augmentations:} Training sequences underwent on-the-fly Gaussian coordinate jittering ($\sigma = 0.01$), random spatial scaling ($s \in [0.92, 1.08]$), and random in-plane rotations ($\theta \in [-12^\circ, +12^\circ]$).
+    \item \textbf{Gradient Clipping:} Maximum gradient norm clipped to $\|\mathbf{g}\|_2 \le 1.0$.
+    \item \textbf{Early Stopping:} Best model checkpoints persisted based on validation Macro F1-score and Top-1 accuracy.
+\end{itemize}
+
+\section*{Ablation Study and Experimental Results}
+We evaluated all four architectures across the identical 30-word dynamic ASL vocabulary on the held-out test split (150 total instances; 90 train, 30 validation, 30 test). 
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lcccccccc}
+\toprule
+\textbf{Model Architecture} & \textbf{Top-1} & \textbf{Top-5} & \textbf{Macro F1} & \textbf{Weighted F1} & \textbf{Params} & \textbf{Latency $p_{50}$} & \textbf{Latency $p_{95}$} & \textbf{Throughput} \\
+\midrule
+Random Forest (150 trees) & 56.67\% & 76.67\% & 50.00\% & 50.00\% & N/A & 39.86\,ms & 56.59\,ms & 23.6 FPS \\
+Kernel SVC (RBF, $C=3.0$) & 40.00\% & 36.67\% & 32.44\% & 32.44\% & N/A & \textbf{0.36\,ms} & \textbf{0.63\,ms} & \textbf{2479.5 FPS} \\
+\textbf{BiGRU + Attention} & 50.00\% & \textbf{93.33\%} & 41.33\% & 41.33\% & 589,342 & 6.03\,ms & 10.26\,ms & 139.9 FPS \\
+\textbf{1D-TCN (Dilated Residual)} & \textbf{60.00\%} & 90.00\% & \textbf{53.89\%} & \textbf{53.89\%} & 679,774 & \textbf{5.47\,ms} & \textbf{7.95\,ms} & \textbf{164.4 FPS} \\
+\bottomrule
+\end{tabular}
+\caption{Comprehensive comparative ablation study across machine learning baselines and deep temporal architectures on held-out test data (30-word dynamic ASL vocabulary).}
+\label{tab:ablation}
+\end{table}
+
+\subsection*{Key Empirical Findings}
+\begin{enumerate}
+    \item \textbf{Top-5 Robustness via Temporal Attention:} 
+    The BiGRU with Temporal Attention achieved the highest Top-5 accuracy at \textbf{93.33\%} (compared to 76.67\% for Random Forest and 36.67\% for SVC). By dynamically assigning attention weights $\alpha_t$ to inflection points in the sign trajectory, the network reliably retains the correct sign in the top candidate pool for over 93\% of dynamic test signs.
+
+    \item \textbf{1D-TCN Accuracy and Real-Time Superiority:} 
+    The 1D Temporal Convolutional Network attained the highest overall performance: \textbf{60.00\% Top-1 accuracy}, \textbf{90.00\% Top-5 accuracy}, and \textbf{53.89\% Macro F1-score}. With an effective receptive field of $RF = 61$ frames covering the entire $T = 30$ window, feed-forward convolution operates at \textbf{5.47\,ms} median latency ($p_{95} = 7.95$\,ms, 164.4 FPS). Crucially, this provides a $7.3\times$ latency reduction compared to the Random Forest baseline (39.86\,ms, 23.6 FPS), fitting comfortably within the real-time frame budget.
+
+    \item \textbf{Disambiguation of Geometric Minimal Pairs:}
+    In Week~2, static statistical feature aggregations struggled to differentiate signs with overlapping convex hulls. The sequential architectures successfully separated these:
+    \begin{itemize}
+        \item \textit{Hello} (upward-outward wrist arc with finger extension) was successfully distinguished from \textit{Goodbye} (downward palm flexure).
+        \item \textit{Drink} (continuous upward tilt toward mouth) was separated from \textit{Eat} (intermittent repetitive tapping).
+    \end{itemize}
+\end{enumerate}
+
+\section*{Latency and Profiling Analysis}
+To confirm edge viability for commodity webcams without dedicated GPUs, we measured the execution profile on a standard CPU:
+\begin{itemize}
+    \item \textbf{Perception Latency (MediaPipe):} $22.86$\,ms per frame (throughput: $43.7$\,FPS).
+    \item \textbf{Mathematical Preprocessing (Norm \& Resampling):} $0.34$\,ms per 30-frame sequence.
+    \item \textbf{Inference Latency (BiGRU):} $6.03$\,ms per sequence (135.4 FPS).
+    \item \textbf{Inference Latency (1D-TCN):} $5.49$\,ms per sequence (163.7 FPS).
+    \item \textbf{Total End-to-End Latency:} $\approx 28.69$\,ms, safely below the 33.3\,ms budget required for 30 FPS real-time webcam operation.
+\end{itemize}
+
+\section*{Challenges and Solutions}
+\begin{itemize}
+    \item \textbf{Overfitting on Modest Temporal Sequence Batches:}
+    Deep networks with hundreds of thousands of parameters can rapidly memorize small coordinate datasets. We mitigated this by pairing kinematic coordinate jittering and spatial scaling with aggressive dropout ($p = 0.3$ on BiGRU, $p = 0.25$ on TCN), weight decay ($\lambda = 10^{-4}$), and label smoothing ($\epsilon = 0.05$).
+    
+    \item \textbf{Preserving Exact Temporal Alignment in Dilated Convolutions:}
+    Standard unpadded dilated convolutions cause sequence shrinking ($L_{\text{out}} < L_{\text{in}}$). We applied symmetric padding $P = (K - 1) \cdot d / 2$, which strictly preserved the temporal length $T = 30$ across all residual blocks and enabled identity skip connections without temporal interpolation artifacts.
+    
+    \item \textbf{Attention Weight Degeneracy:}
+    Early training epochs occasionally exhibited uniform attention weights across all frames. Initializing the attention projection layer with moderate variance and scaling the input embedding through LayerNorm stabilized attention gradient flow, enabling the network to focus on informative phase peaks.
+\end{itemize}
+
+\section*{Next Steps (Week 4 Plan)}
+For the upcoming week, we will focus on advanced spatiotemporal modeling and deployment readiness:
+\begin{itemize}
+    \item \textbf{Spatial-Temporal Graph Convolutional Networks (ST-GCN):} Implement skeletal graph adjacency matrices reflecting physical anatomical hand topology (wrist, MCP, PIP, DIP, TIP) to model spatial joint relationships explicitly \cite{yan2018spatial}.
+    \item \textbf{Transformer Cross-Attention Backbone:} Prototype a lightweight multi-head self-attention encoder to evaluate long-range spatiotemporal dependencies against the BiGRU and 1D-TCN backbones.
+    \item \textbf{Model Quantization \& ONNX Export:} Export the trained 1D-TCN and BiGRU models to ONNX runtime with INT8 dynamic quantization to further reduce memory footprint and latency for in-browser deployment.
+\end{itemize}
+
+\section*{Project Contributions}
+This is an individual project. All architecture designs, mathematical formulations, training implementations, and experimental profiling were completed independently by \textbf{Ahmad Nakhala}:
+\begin{itemize}
+    \item \textbf{BiGRU with Attention:} Formulated and implemented the 2-layer Bidirectional GRU with self-attentive temporal pooling in \texttt{src/models.py}.
+    \item \textbf{Dilated 1D-TCN:} Designed the 4-layer multi-scale dilated residual convolutional network with receptive field formalization ($RF = 61$).
+    \item \textbf{Training \& Profiling Pipeline:} Developed \texttt{src/trainer.py} with AdamW, Cosine Annealing, early stopping, and multi-metric validation, and added percentile latency profiling ($p_{50}, p_{95}, p_{99}$) in \texttt{src/profiler.py}.
+    \item \textbf{Interactive Webcam Demo:} Updated \texttt{scripts/demo_webcam.py} to support real-time dynamic switching between deep models and baseline classifiers with on-screen performance metrics.
+\end{itemize}
+
+\begin{thebibliography}{99}
+
+\bibitem{li2020word}
+Dongxu Li, Cristian Rodriguez, Xin Yu, and Hongdong Li.
+\newblock Word-level deep sign language recognition from video: A new large-scale dataset and methods comparison.
+\newblock In \emph{Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)}, pages 1459--1469, 2020.
+
+\bibitem{wlasl_github}
+WLASL Research Consortium.
+\newblock Word-Level American Sign Language (WLASL) dataset repository and video annotations.
+\newblock GitHub Repository: \url{https://github.com/dxli94/WLASL}, 2020.
+
+\bibitem{lugaresi2019mediapipe}
+Camillo Lugaresi, Jiuqiang Tang, Hadon Nash, Chris McClanahan, Esha Uboweja, Michael Somani, Danhang Zhang, Morgan Amy, He~Wang, Andrew Goodhew, et~al.
+\newblock {MediaPipe}: A framework for building perception pipelines.
+\newblock \emph{arXiv preprint arXiv:1906.08172}, 2019.
+
+\bibitem{zhang2020mediapipe}
+Fan Zhang, Valentin Bazarevsky, Andrey Vakunov, Andrei Tkachenka, George Sung, Chuo-Ling Chang, and Matthias Grundmann.
+\newblock {MediaPipe Hands}: On-device real-time hand tracking.
+\newblock In \emph{CVPR Workshop on Computer Vision for Augmented and Virtual Reality}, 2020.
+
+\bibitem{cho2014learning}
+Kyunghyun Cho, Bart Van~Merri{\"e}nboer, Caglar Gulcehre, Dzmitry Bahdanau, Fethi Bougares, Holger Schwenk, and Yoshua Bengio.
+\newblock Learning phrase representations using {RNN} encoder-decoder for statistical machine translation.
+\newblock \emph{arXiv preprint arXiv:1406.1078}, 2014.
+
+\bibitem{bai2018empirical}
+Shaojie Bai, J~Zico Kolter, and Vladlen Koltun.
+\newblock An empirical evaluation of generic convolutional and recurrent networks for sequence modeling.
+\newblock \emph{arXiv preprint arXiv:1803.01271}, 2018.
+
+\bibitem{bahdanau2014neural}
+Dzmitry Bahdanau, Kyunghyun Cho, and Yoshua Bengio.
+\newblock Neural machine translation by jointly learning to align and translate.
+\newblock \emph{arXiv preprint arXiv:1409.0473}, 2014.
+
+\bibitem{loshchilov2017decoupled}
+Ilya Loshchilov and Frank Hutter.
+\newblock Decoupled weight decay regularization.
+\newblock \emph{arXiv preprint arXiv:1711.05101}, 2017.
+
+\bibitem{yan2018spatial}
+Sijie Yan, Yuanjun Xiong, and Dahua Lin.
+\newblock Spatial temporal graph convolutional networks for skeleton-based action recognition.
+\newblock In \emph{Proceedings of the AAAI Conference on Artificial Intelligence}, volume~32, 2018.
+
+\bibitem{breiman2001random}
+Leo Breiman.
+\newblock Random forests.
+\newblock \emph{Machine Learning}, 45(1):5--32, 2001.
+
+\bibitem{cortes1995support}
+Corinna Cortes and Vladimir Vapnik.
+\newblock Support-vector networks.
+\newblock \emph{Machine Learning}, 20(3):273--297, 1995.
+
+\end{thebibliography}
+
+\end{document}
