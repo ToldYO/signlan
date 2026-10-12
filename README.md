@@ -1,6 +1,6 @@
 # Low-Latency Privacy-Preserving ASL Recognition via Coordinate Trajectory Tracking
 
-This repository contains the complete implementation for **Week 1**, **Week 2**, and **Week 3** of the American Sign Language (ASL) dynamic recognition system.
+This repository contains the complete implementation for **Weeks 1–4** of the American Sign Language (ASL) dynamic recognition system.
 
 The project investigates low-latency, privacy-preserving dynamic word-level sign language recognition from monocular webcam feeds. Rather than relying on computationally heavy 3D-CNNs operating directly on high-dimensional raw video frames, the architecture decouples geometric feature extraction from temporal sequence modeling:
 1. **Geometric Feature Extraction**: Extracts 21 3D hand keypoints per frame via Google MediaPipe Hands (63 float coordinates for single hand, 126 for dual-hand).
@@ -165,7 +165,18 @@ python scripts/demo_webcam.py --model_type tcn
 python scripts/demo_webcam.py --model_type random_forest
 ```
 
-### 5. Run Comprehensive Unit Tests
+### 5. Execute Week 4 Pipeline
+Trains the anatomical ST-GCN and lightweight Transformer, writes their checkpoints and benchmark JSON, and exports ONNX models. The Week 3 cache is reused.
+```bash
+python scripts/run_week4_pipeline.py
+
+# Optional dynamic INT8 ONNX Runtime quantization (requires `pip install onnx onnxruntime`)
+python scripts/run_week4_pipeline.py --quantize
+```
+
+The webcam demo also accepts `--model_type stgcn` and `--model_type transformer` after their checkpoints are trained.
+
+### 6. Run Comprehensive Unit Tests
 Executes the unit test suites:
 ```bash
 # Pipeline & Preprocessing tests
@@ -173,6 +184,9 @@ python tests/test_pipeline.py
 
 # Week 3 Deep Sequence Models & Trainer tests
 python tests/test_week3_models.py
+
+# Week 4 ST-GCN and Transformer tests
+python tests/test_week4_models.py
 ```
 
 ---

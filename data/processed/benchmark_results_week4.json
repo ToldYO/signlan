@@ -1,0 +1,20 @@
+{
+  "stgcn": {
+    "top_1_accuracy": 0.16666666666666666,
+    "top_5_accuracy": 0.6333333333333333,
+    "macro_f1": 0.1,
+    "parameter_count": 68670,
+    "latency_p50_ms": 1.4009500000611297,
+    "latency_p95_ms": 1.958994999858987,
+    "throughput_fps": 702.4272373180543
+  },
+  "transformer": {
+    "top_1_accuracy": 0.13333333333333333,
+    "top_5_accuracy": 0.5666666666666667,
+    "macro_f1": 0.04962962962962963,
+    "parameter_count": 425502,
+    "latency_p50_ms": 1.4629500000182816,
+    "latency_p95_ms": 2.3236799998926467,
+    "throughput_fps": 683.2848371995676
+  }
+}

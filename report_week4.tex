@@ -1,0 +1,129 @@
+\documentclass{article}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\title{Progress Report -- Week 4\\
+\large Anatomical Graph Modeling, Transformer Encoding, and Portable Inference for Dynamic ASL Recognition}
+\author{Ahmad Nakhala\\
+\texttt{aalnakha@emich.edu}\\
+\vspace{0.3em}
+\normalsize Code Repository: \url{https://github.com/ToldYO/signlan}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Project Overview}
+This project develops a low-latency, privacy-preserving dynamic American Sign Language (ASL) recognizer from monocular hand-keypoint trajectories. Rather than transmitting or classifying raw RGB video, the pipeline extracts MediaPipe hand landmarks, wrist-centers and scale-normalizes them, resamples each gesture to $T=30$ frames, and classifies the resulting coordinate sequence. Weeks~1--3 established the perception stack, kinematic preprocessing, classical baselines, a bidirectional GRU with temporal attention, and a dilated 1D temporal convolutional network (TCN).
+
+\textbf{Week~4} extends the project in two directions: (1) models that explicitly represent hand-joint topology and long-range temporal relationships, and (2) a deployment path that exports trained PyTorch classifiers to ONNX and optionally applies dynamic INT8 quantization. The implementation is contained in \texttt{src/models.py}, \texttt{src/export.py}, and \texttt{scripts/run\_week4\_pipeline.py}.
+
+\section*{Anatomical Spatial--Temporal Graph Convolutional Network}
+MediaPipe represents each hand with 21 ordered landmarks. Treating a flattened 63-dimensional frame as an unstructured vector discards the fact that joints are linked by a physical hand skeleton. To retain this structure, we implemented a spatial--temporal graph convolutional network (ST-GCN) inspired by skeleton-based action recognition \cite{yan2018spatial}.
+
+\subsection*{Hand Graph Construction}
+For one hand, the graph contains the wrist, four thumb joints, and four joints for each remaining finger. Undirected edges follow the anatomical chains
+\[
+0\!\leftrightarrow\!1\!\leftrightarrow\!2\!\leftrightarrow\!3\!\leftrightarrow\!4,
+\quad 0\!\leftrightarrow\!5\!\leftrightarrow\!\cdots\!\leftrightarrow\!8,
+\]
+with corresponding chains for the middle, ring, and pinky fingers. Palm links $(5,9)$, $(9,13)$, and $(13,17)$ make the five chains a connected graph. Self-loops are added, and the adjacency matrix is row-normalized:
+\[
+\widetilde{A}_{ij} = \frac{A_{ij} + I_{ij}}{\sum_k (A_{ik}+I_{ik})}.
+\]
+For dual-hand input ($D=126$), the implementation constructs two independent 21-joint graphs, preserving the zero-padded representation used in Week~3.
+
+At each time step, a graph-convolution layer propagates information between neighboring joints:
+\[
+H_t^{(l+1)} = \sigma\left(\widetilde{A}H_t^{(l)}W^{(l)} + b^{(l)}\right).
+\]
+Two graph-convolution layers project the input from three coordinates per joint to a 96-dimensional latent space. Joint features are mean-pooled, then processed by two temporal $1\times3$ convolutions with GELU activations and dropout. Global temporal average pooling and a linear classifier produce the final gloss logits. This design maintains a clear division of labor: graph layers model instantaneous hand geometry, while temporal convolutions model motion.
+
+\section*{Lightweight Transformer Encoder}
+Recurrent and convolutional models have complementary temporal biases, but neither directly exposes all pairwise frame interactions in a layer. We therefore added a compact Transformer encoder \cite{vaswani2017attention} to evaluate long-range temporal dependencies.
+
+Each $D$-dimensional coordinate frame is linearly embedded into $H=128$ features and combined with a learned positional embedding. Two encoder layers, each with four attention heads, use pre-normalized multi-head self-attention and a feed-forward expansion of $4H$. For an input representation $E\in\mathbb{R}^{T\times H}$, one attention head is
+\[
+\operatorname{Attention}(Q,K,V)=\operatorname{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V.
+\]
+The model supports an optional Boolean frame mask. Padded frames are excluded from both the encoder attention mask and the final masked mean pooling operation. This makes the backbone compatible with future variable-length inputs, even though the current training pipeline resamples all examples to 30 frames.
+
+\section*{Portable ONNX and INT8 Deployment Path}
+The new \texttt{export\_onnx\_model} utility exports an evaluation-mode PyTorch classifier with dynamic batch and temporal axes. The generated model has input \texttt{keypoints} of shape $(B,T,D)$ and output \texttt{logits} of shape $(B,C)$, allowing a deployment runtime to vary batch size and gesture-window length without retracing the model.
+
+An optional \texttt{quantize\_onnx\_dynamic} step uses ONNX Runtime dynamic quantization to convert eligible weights to signed INT8. ONNX and ONNX Runtime are deliberately optional dependencies: the training pipeline and live webcam demo remain usable in a minimal PyTorch installation. When installed, reproducible export and quantization are invoked with:
+\begin{verbatim}
+python scripts/run_week4_pipeline.py --quantize
+\end{verbatim}
+The same runner trains the ST-GCN and Transformer, writes model checkpoints under \texttt{models/}, and saves measured metrics to \texttt{data/processed/benchmark\_results\_week4.json}.
+
+\section*{Implementation Verification}
+The Week~4 unit suite verifies the most important structural invariants without claiming unexecuted dataset-level results.
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{0.34\linewidth}p{0.55\linewidth}}
+\toprule
+\textbf{Check} & \textbf{Verification}\\
+\midrule
+Graph topology & A dual-hand adjacency matrix has shape $42\times42$; every row sums to one; no graph edge crosses from one hand to the other.\\
+ST-GCN compatibility & Forward and backward passes succeed for both $(B,30,63)$ single-hand and $(B,30,126)$ dual-hand inputs.\\
+Transformer masking & The encoder accepts a Boolean temporal mask, produces $(B,C)$ logits, and propagates gradients through the coordinate embedding.\\
+Regression safety & The existing Week~3 suite continues to pass for temporal attention, BiGRU, TCN, and trainer behavior.\\
+\bottomrule
+\end{tabular}
+\caption{Automated implementation checks added for Week~4.}
+\end{table}
+
+\section*{Experimental Protocol and Results}
+The Week~4 runner used the cached 30-word trajectories, $T=30$ preprocessing, train/validation/test split, AdamW optimizer, label smoothing, early stopping criterion, and CPU latency profiler from Week~3. It records Top-1 accuracy, Top-5 accuracy, Macro F1, parameter count, $p_{50}$ and $p_{95}$ inference latency, and throughput for the two new architectures. The run completed successfully and wrote checkpoints and \texttt{data/processed/benchmark\_results\_week4.json}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+\textbf{Architecture} & \textbf{Top-1} & \textbf{Top-5} & \textbf{Macro F1} & \textbf{Params} & \textbf{$p_{50}$} & \textbf{Throughput} \\
+\midrule
+ST-GCN & 20.00\% & \textbf{70.00\%} & \textbf{13.33\%} & \textbf{68,670} & \textbf{1.35 ms} & \textbf{814.0 FPS} \\
+Transformer & 13.33\% & 60.00\% & 7.62\% & 425,502 & 1.39 ms & 743.0 FPS \\
+\bottomrule
+\end{tabular}
+\caption{Week~4 held-out test results. ST-GCN $p_{95}=1.77$ ms; Transformer $p_{95}=1.86$ ms.}
+\label{tab:week4-results}
+\end{table}
+
+\subsection*{Interpretation}
+The ST-GCN produced the stronger Week~4 result on every accuracy measure while requiring only 16\% of the Transformer parameters. Both models were exceptionally fast in CPU inference: their median latency is below 1.4 ms per 30-frame sequence. However, their Top-1 scores are lower than the 1D-TCN result reported in Week~3 (60.00\% on the same 30-word benchmark). This is consistent with the very small training partition (90 examples): the graph model has limited opportunity to learn class-specific temporal patterns, while the Transformer has substantially more parameters. The results support retaining the TCN as the accuracy-oriented default, while treating the ST-GCN as a highly compact, topology-aware candidate for further tuning.
+
+\section*{Challenges and Design Decisions}
+\begin{itemize}
+    \item \textbf{Topology versus hand interaction:} The initial graph intentionally contains no cross-hand edges. This prevents arbitrary landmark-index connections between hands whose relative pose can vary widely. A future variant can add learned or distance-conditioned inter-hand edges for explicitly two-handed signs.
+    \item \textbf{Mask correctness:} Applying a mask only at final pooling would still let padded frames influence self-attention. The Transformer applies the mask inside the encoder and during pooling.
+    \item \textbf{Portable exports:} Dynamic ONNX axes improve reuse but require conservative, standard operations. The export helper keeps the interface to one coordinate tensor and one logits tensor.
+    \item \textbf{Quantization availability:} Quantization is useful for deployment but should not make basic research workflows fail. It is therefore opt-in and emits a clear dependency error when ONNX Runtime is unavailable.
+\end{itemize}
+
+\section*{Next Steps}
+The immediate next step is hyperparameter tuning and expanded-data evaluation. In particular, longer training with more examples per word, learned inter-hand edges, and motion features (joint displacement or velocity) may help the ST-GCN use anatomical structure more effectively. The Transformer should be evaluated with stronger data augmentation or a smaller hidden size to reduce overfitting. A final deployment evaluation should compare PyTorch FP32, ONNX FP32, and ONNX dynamic INT8 latency and output agreement on the same held-out trajectories.
+
+\section*{Project Contributions and AI Disclosure}
+This is an individual course project directed and evaluated by \textbf{Ahmad Nakhala}. Week~4 contributions include the MediaPipe anatomical graph definition, ST-GCN and Transformer implementations, ONNX/INT8 export utilities, the reproducible training runner, webcam-model integration, and automated tests. An AI coding assistant was used as a pair-programming tool for implementation scaffolding, test generation, and LaTeX formatting. Model selection, experiment design, verification, and final reporting remain the responsibility of the author.
+
+\begin{thebibliography}{9}
+\bibitem{yan2018spatial}
+Sijie Yan, Yuanjun Xiong, and Dahua Lin.
+\newblock Spatial temporal graph convolutional networks for skeleton-based action recognition.
+\newblock In \emph{Proceedings of the AAAI Conference on Artificial Intelligence}, 2018.
+
+\bibitem{vaswani2017attention}
+Ashish Vaswani et al.
+\newblock Attention is all you need.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2017.
+\end{thebibliography}
+
+\end{document}

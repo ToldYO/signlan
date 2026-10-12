@@ -25,7 +25,7 @@ from src.preprocessor import preprocess_sequence
 from src.feature_extraction import extract_trajectory_features_single
 from src.baselines import ASLBaselineBenchmarks
 from src.data_ingestion import load_vocabulary
-from src.models import BiGRUClassifier, TemporalConvNet
+from src.models import BiGRUClassifier, TemporalConvNet, STGCNClassifier, TransformerClassifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -101,6 +101,19 @@ def load_inference_model(
         model.to(dev)
         model.eval()
         logger.info(f"Loaded 1D-TCN model from {path}")
+        return model, "pytorch"
+
+    elif model_type in {"stgcn", "transformer"}:
+        path = checkpoint_path or f"models/{model_type}_best.pth"
+        if not os.path.exists(path):
+            logger.warning(f"{model_type} checkpoint {path} not found.")
+            return None, "pytorch"
+        model_class = STGCNClassifier if model_type == "stgcn" else TransformerClassifier
+        model = model_class(input_dim=63, num_classes=num_classes)
+        ckpt = torch.load(path, map_location=dev)
+        model.load_state_dict(ckpt.get("model_state_dict", ckpt))
+        model.to(dev).eval()
+        logger.info(f"Loaded {model_type} model from {path}")
         return model, "pytorch"
 
     elif model_type == "random_forest":

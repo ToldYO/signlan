@@ -14,6 +14,119 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# MediaPipe's 21 landmark hand topology.  The final three palm links make the
+# graph connected across the five fingers rather than treating each finger as
+# an isolated chain.
+HAND_EDGES: Tuple[Tuple[int, int], ...] = (
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (0, 9), (9, 10), (10, 11), (11, 12),
+    (0, 13), (13, 14), (14, 15), (15, 16),
+    (0, 17), (17, 18), (18, 19), (19, 20),
+    (5, 9), (9, 13), (13, 17),
+)
+
+
+def build_hand_adjacency(num_hands: int = 1, include_self: bool = True) -> torch.Tensor:
+    """Returns a row-normalized anatomical adjacency matrix for 21-point hands."""
+    if num_hands < 1:
+        raise ValueError("num_hands must be at least one")
+    joints = 21 * num_hands
+    adjacency = torch.zeros(joints, joints, dtype=torch.float32)
+    for hand in range(num_hands):
+        offset = hand * 21
+        for src, dst in HAND_EDGES:
+            adjacency[offset + src, offset + dst] = 1.0
+            adjacency[offset + dst, offset + src] = 1.0
+    if include_self:
+        adjacency.fill_diagonal_(1.0)
+    return adjacency / adjacency.sum(dim=1, keepdim=True).clamp_min(1.0)
+
+
+class SpatialGraphConv(nn.Module):
+    """A graph convolution over hand joints at every frame."""
+
+    def __init__(self, in_channels: int, out_channels: int, adjacency: torch.Tensor):
+        super().__init__()
+        self.register_buffer("adjacency", adjacency)
+        self.projection = nn.Linear(in_channels, out_channels, bias=False)
+        self.bias = nn.Parameter(torch.zeros(out_channels))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, V, C); propagate neighbours then transform channels.
+        return torch.einsum("vw,btwc->btvc", self.adjacency, x).matmul(self.projection.weight.T) + self.bias
+
+
+class STGCNClassifier(nn.Module):
+    """Lightweight spatial-temporal GCN using the anatomical MediaPipe hand graph."""
+
+    def __init__(
+        self, input_dim: int = 63, num_classes: int = 30,
+        hidden_dim: int = 96, dropout: float = 0.25,
+    ):
+        super().__init__()
+        if input_dim % 63 != 0:
+            raise ValueError("input_dim must contain 21 joints with xyz coordinates per hand")
+        self.input_dim = input_dim
+        self.num_hands = input_dim // 63
+        self.num_joints = self.num_hands * 21
+        adjacency = build_hand_adjacency(self.num_hands)
+        self.gcn1 = SpatialGraphConv(3, hidden_dim, adjacency)
+        self.gcn2 = SpatialGraphConv(hidden_dim, hidden_dim, adjacency)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.temporal = nn.Sequential(
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1), nn.GELU(),
+            nn.Dropout(dropout), nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1), nn.GELU(),
+        )
+        self.classifier = nn.Sequential(nn.LayerNorm(hidden_dim), nn.Dropout(dropout), nn.Linear(hidden_dim, num_classes))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, frames, features = x.shape
+        if features != self.input_dim:
+            raise ValueError(f"Expected {self.input_dim} features, got {features}")
+        joints = x.reshape(batch, frames, self.num_joints, 3)
+        h = F.gelu(self.norm1(self.gcn1(joints)))
+        h = F.gelu(self.norm2(self.gcn2(h))) + h
+        # Pool joints before temporal convolution: (B, C, T).
+        h = self.temporal(h.mean(dim=2).transpose(1, 2))
+        return self.classifier(h.mean(dim=2))
+
+
+class TransformerClassifier(nn.Module):
+    """Compact Transformer encoder with learned temporal positions for ASL sequences."""
+
+    def __init__(
+        self, input_dim: int = 63, num_classes: int = 30, hidden_dim: int = 128,
+        num_layers: int = 2, num_heads: int = 4, dropout: float = 0.2, max_frames: int = 128,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.input_dim = input_dim
+        self.max_frames = max_frames
+        self.input_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.GELU(), nn.Dropout(dropout))
+        self.position = nn.Parameter(torch.zeros(1, max_frames, hidden_dim))
+        layer = nn.TransformerEncoderLayer(hidden_dim, num_heads, hidden_dim * 4, dropout, batch_first=True, norm_first=True, activation="gelu")
+        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers, norm=nn.LayerNorm(hidden_dim))
+        self.classifier = nn.Sequential(nn.Dropout(dropout), nn.Linear(hidden_dim, num_classes))
+        nn.init.trunc_normal_(self.position, std=0.02)
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if x.size(-1) != self.input_dim:
+            raise ValueError(f"Expected {self.input_dim} features, got {x.size(-1)}")
+        if x.size(1) > self.max_frames:
+            raise ValueError(f"Sequence length exceeds max_frames={self.max_frames}")
+        h = self.input_proj(x) + self.position[:, :x.size(1)]
+        h = self.encoder(h, src_key_padding_mask=None if mask is None else ~mask)
+        if mask is None:
+            pooled = h.mean(dim=1)
+        else:
+            weights = mask.unsqueeze(-1).to(h.dtype)
+            pooled = (h * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+        return self.classifier(pooled)
+
+
 class TemporalAttentionPooling(nn.Module):
     """
     Self-attentive temporal pooling layer.
