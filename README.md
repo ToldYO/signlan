@@ -1,6 +1,6 @@
 # Low-Latency Privacy-Preserving ASL Recognition via Coordinate Trajectory Tracking
 
-This repository contains the complete implementation for **Weeks 1–4** of the American Sign Language (ASL) dynamic recognition system.
+This repository contains the complete implementation for **Weeks 1–5** of the American Sign Language (ASL) dynamic recognition system.
 
 The project investigates low-latency, privacy-preserving dynamic word-level sign language recognition from monocular webcam feeds. Rather than relying on computationally heavy 3D-CNNs operating directly on high-dimensional raw video frames, the architecture decouples geometric feature extraction from temporal sequence modeling:
 1. **Geometric Feature Extraction**: Extracts 21 3D hand keypoints per frame via Google MediaPipe Hands (63 float coordinates for single hand, 126 for dual-hand).
@@ -187,6 +187,16 @@ python tests/test_week3_models.py
 
 # Week 4 ST-GCN and Transformer tests
 python tests/test_week4_models.py
+
+# Week 5 adaptive graph, calibration, and robustness tests
+python tests/test_week5_reliability.py
+```
+
+### 7. Execute Week 5 Pipeline
+Trains a motion-aware adaptive ST-GCN, calibrates confidence on the validation split,
+and evaluates clean accuracy plus landmark-noise and missing-frame robustness:
+```bash
+python scripts/run_week5_pipeline.py
 ```
 
 ---

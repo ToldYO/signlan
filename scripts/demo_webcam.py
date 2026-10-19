@@ -25,7 +25,8 @@ from src.preprocessor import preprocess_sequence
 from src.feature_extraction import extract_trajectory_features_single
 from src.baselines import ASLBaselineBenchmarks
 from src.data_ingestion import load_vocabulary
-from src.models import BiGRUClassifier, TemporalConvNet, STGCNClassifier, TransformerClassifier
+from src.models import (AdaptiveMotionSTGCNClassifier, BiGRUClassifier,
+                        TemporalConvNet, STGCNClassifier, TransformerClassifier)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -103,12 +104,13 @@ def load_inference_model(
         logger.info(f"Loaded 1D-TCN model from {path}")
         return model, "pytorch"
 
-    elif model_type in {"stgcn", "transformer"}:
+    elif model_type in {"stgcn", "transformer", "adaptive_motion_stgcn"}:
         path = checkpoint_path or f"models/{model_type}_best.pth"
         if not os.path.exists(path):
             logger.warning(f"{model_type} checkpoint {path} not found.")
             return None, "pytorch"
-        model_class = STGCNClassifier if model_type == "stgcn" else TransformerClassifier
+        model_class = {"stgcn": STGCNClassifier, "transformer": TransformerClassifier,
+                       "adaptive_motion_stgcn": AdaptiveMotionSTGCNClassifier}[model_type]
         model = model_class(input_dim=63, num_classes=num_classes)
         ckpt = torch.load(path, map_location=dev)
         model.load_state_dict(ckpt.get("model_state_dict", ckpt))
@@ -268,7 +270,7 @@ def run_webcam_demo(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Real-Time Webcam ASL Recognition HUD")
-    parser.add_argument("--model_type", type=str, default="bigru", choices=["bigru", "tcn", "random_forest", "svc"])
+    parser.add_argument("--model_type", type=str, default="bigru", choices=["bigru", "tcn", "stgcn", "transformer", "adaptive_motion_stgcn", "random_forest", "svc"])
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--cam", type=int, default=0)
     args = parser.parse_args()

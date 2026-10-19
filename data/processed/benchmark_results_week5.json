@@ -1,0 +1,33 @@
+{
+  "model": "adaptive_motion_stgcn",
+  "parameter_count": 81591,
+  "clean": {
+    "top_1_accuracy": 0.2,
+    "top_5_accuracy": 0.8,
+    "macro_f1": 0.17777777777777776
+  },
+  "calibration": {
+    "temperature": 0.5907350182533264,
+    "ece_before": 0.06436756427089373,
+    "ece_after": 0.06451494246721266
+  },
+  "robustness_top_1": {
+    "gaussian_noise_0.02": 0.2,
+    "gaussian_noise_0.05": 0.16666666666666666,
+    "frame_dropout_0.10": 0.1,
+    "frame_dropout_0.20": 0.1
+  },
+  "latency": {
+    "iterations": 200,
+    "mean_latency_ms": 1.0822909999984631,
+    "std_latency_ms": 0.39835254878564186,
+    "median_latency_ms": 0.8871499999827392,
+    "p90_latency_ms": 1.4318699999762428,
+    "p95_latency_ms": 1.8157150000092768,
+    "p99_latency_ms": 2.3348459999954225,
+    "min_latency_ms": 0.7050000000390355,
+    "max_latency_ms": 4.210400000033587,
+    "throughput_fps": 923.9659204423025,
+    "parameter_count": 81591
+  }
+}

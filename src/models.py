@@ -93,6 +93,61 @@ class STGCNClassifier(nn.Module):
         return self.classifier(h.mean(dim=2))
 
 
+class AdaptiveMotionSTGCNClassifier(nn.Module):
+    """ST-GCN variant that fuses position/velocity and learns graph refinements."""
+
+    def __init__(
+        self, input_dim: int = 63, num_classes: int = 30,
+        hidden_dim: int = 96, dropout: float = 0.25,
+    ):
+        super().__init__()
+        if input_dim % 63 != 0:
+            raise ValueError("input_dim must contain 21 joints with xyz coordinates per hand")
+        self.input_dim = input_dim
+        self.num_hands = input_dim // 63
+        self.num_joints = self.num_hands * 21
+        self.register_buffer("base_adjacency", build_hand_adjacency(self.num_hands))
+        # A zero-initialized residual lets training add useful intra/inter-hand edges
+        # without discarding the anatomical prior.
+        self.adjacency_residual = nn.Parameter(torch.zeros(self.num_joints, self.num_joints))
+        self.input_projection = nn.Linear(6, hidden_dim)
+        self.gcn1_projection = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.gcn2_projection = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.temporal = nn.Sequential(
+            nn.Conv1d(hidden_dim, hidden_dim, 3, padding=1), nn.GELU(), nn.Dropout(dropout),
+            nn.Conv1d(hidden_dim, hidden_dim, 3, padding=1), nn.GELU(),
+        )
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(hidden_dim * 2), nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, num_classes),
+        )
+
+    def normalized_adjacency(self) -> torch.Tensor:
+        """Returns a non-negative, row-normalized adaptive adjacency matrix."""
+        residual = F.softplus(self.adjacency_residual) - math.log(2.0)
+        adjacency = (self.base_adjacency + residual).clamp_min(0.0)
+        adjacency = 0.5 * (adjacency + adjacency.T)
+        return adjacency / adjacency.sum(dim=1, keepdim=True).clamp_min(1e-6)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, frames, features = x.shape
+        if features != self.input_dim:
+            raise ValueError(f"Expected {self.input_dim} features, got {features}")
+        position = x.reshape(batch, frames, self.num_joints, 3)
+        velocity = torch.diff(position, dim=1, prepend=position[:, :1])
+        h = self.input_projection(torch.cat((position, velocity), dim=-1))
+        adjacency = self.normalized_adjacency()
+        h1 = torch.einsum("vw,btwc->btvc", adjacency, h)
+        h1 = F.gelu(self.norm1(self.gcn1_projection(h1)))
+        h2 = torch.einsum("vw,btwc->btvc", adjacency, h1)
+        h = F.gelu(self.norm2(self.gcn2_projection(h2))) + h1
+        h = self.temporal(h.mean(dim=2).transpose(1, 2))
+        pooled = torch.cat((h.mean(dim=2), h.amax(dim=2)), dim=1)
+        return self.classifier(pooled)
+
+
 class TransformerClassifier(nn.Module):
     """Compact Transformer encoder with learned temporal positions for ASL sequences."""
 

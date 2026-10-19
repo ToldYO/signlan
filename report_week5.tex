@@ -1,0 +1,47 @@
+\documentclass{article}
+\usepackage{geometry}
+\geometry{a4paper,margin=1in}
+\usepackage{amsmath,booktabs,hyperref,microtype}
+\title{Progress Report -- Week 5\\\large Motion-Aware Graph Learning, Confidence Calibration, and Robustness Evaluation}
+\author{Ahmad Nakhala\\\texttt{aalnakha@emich.edu}\\\normalsize Code Repository: \url{https://github.com/ToldYO/signlan}}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section*{Objective}
+Week~5 addresses the limitations identified in Week~4: fixed anatomical edges, position-only graph inputs, and evaluation limited to clean accuracy. The implementation adds an Adaptive Motion ST-GCN, held-out temperature calibration, and reproducible robustness tests for landmark noise and missing frames. The work is contained in \texttt{src/models.py}, \texttt{src/calibration.py}, and \texttt{scripts/run\_week5\_pipeline.py}.
+
+\section*{Adaptive Motion ST-GCN}
+For joint position $P_t\in\mathbb{R}^{V\times3}$, first-order motion is
+\[
+V_t=P_t-P_{t-1},\qquad V_0=0.
+\]
+The six-channel joint input $[P_t;V_t]$ explicitly exposes direction and speed. Graph propagation uses an anatomical prior $A_0$ and a trainable symmetric residual $R$:
+\[
+A=\operatorname{RowNorm}\!\left(\max\left(0,A_0+\operatorname{softplus}(R)-\log2\right)_{\rm sym}\right).
+\]
+Because $R$ begins at zero, training starts from the validated MediaPipe skeleton. For dual-hand input, optimization may learn inter-hand links when the data supports them. Two graph layers are followed by temporal convolutions and concatenated mean/max pooling.
+
+\section*{Confidence Calibration}
+Neural softmax scores are not automatically calibrated probabilities. A scalar temperature $T>0$ is fit using validation logits only by minimizing negative log likelihood. Test probabilities are then
+\[
+p(y=c\mid x)=\operatorname{softmax}(z/T)_c.
+\]
+The runner reports expected calibration error (ECE) before and after scaling. Fitting on validation data preserves the test split for unbiased final evaluation.
+
+\section*{Robustness Protocol}
+In addition to Top-1, Top-5, Macro F1, parameters, and latency, the Week~5 runner measures Top-1 accuracy under deterministic coordinate noise ($\sigma=0.02,0.05$) and periodic frame dropout (10\%, 20\%). Fixed corruption seeds make comparisons repeatable. These conditions approximate landmark jitter and temporary tracking failure in webcam use.
+
+\section*{Reproducibility and Verification}
+The command
+\begin{verbatim}
+python scripts/run_week5_pipeline.py
+\end{verbatim}
+trains the model, saves \texttt{models/adaptive\_motion\_stgcn\_best.pth}, and writes all measured outputs to \texttt{data/processed/benchmark\_results\_week5.json}. Automated tests verify single/dual-hand forward and backward passes, normalized learned adjacency, temperature-scaling behavior, and deterministic corruptions. No numerical result is claimed until that command completes successfully in an environment permitted to load PyTorch binaries.
+
+\section*{Next Steps}
+The next evaluation should expand the number of real examples per gloss and report mean and standard deviation over multiple seeds. Reliability diagrams, per-class robustness, and learned-edge visualization can then identify which signs depend most strongly on motion or cross-hand interaction.
+
+\section*{AI Disclosure}
+This is an individual course project directed and evaluated by \textbf{Ahmad Nakhala}. An AI coding assistant was used for implementation scaffolding, tests, and report formatting. Experimental execution, interpretation, and final submission remain the responsibility of the author.
+\end{document}
